@@ -1,0 +1,268 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+enum UserRole {
+  ADMIN
+  SELLER
+  BUYER
+  SUPPORT
+  SELLER_MANAGER
+  PRODUCT_MANAGER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum SellerStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  NEEDS_INFO
+}
+
+enum ProductStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  RETURNED
+}
+
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  PROCESSING
+  COMPLETED
+}
+
+// Models
+
+model User {
+  id        String     @id @default(uuid())
+  email     String     @unique
+  password  String
+  firstName String?
+  lastName  String?
+  phone     String?
+  role      UserRole   @default(BUYER)
+  status    UserStatus @default(ACTIVE)
+  
+  // Relations
+  sellerApplication SellerApplication?
+  orders            Order[]
+  products          Product[]
+  auditLogs         AuditLog[]
+  notifications     Notification[]
+  
+  // RBAC
+  roles             Role[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  description String?
+  permissions RolePermission[]
+  users       User[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  resource    String           // e.g., "users", "products"
+  action      String           // e.g., "create", "read", "update", "delete"
+  description String?
+  roles       RolePermission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([resource, action])
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String     @id @default(uuid())
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model SellerApplication {
+  id              String       @id @default(uuid())
+  userId          String       @unique
+  user            User         @relation(fields: [userId], references: [id])
+  businessName    String
+  businessAddress String?
+  taxId           String?      // PAN/GST
+  documents       String[]     // URLs to images
+  status          SellerStatus @default(PENDING)
+  rejectionReason String?
+  adminNotes      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("seller_applications")
+}
+
+model Category {
+  id          String     @id @default(uuid())
+  name        String
+  slug        String     @unique
+  description String?
+  image       String?
+  isActive    Boolean    @default(true)
+  parentId    String?
+  parent      Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryHierarchy")
+  products    Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("categories")
+}
+
+model Product {
+  id          String        @id @default(uuid())
+  title       String
+  description String?
+  price       Decimal       @db.Decimal(10, 2)
+  stock       Int           @default(0)
+  images      String[]
+  status      ProductStatus @default(PENDING)
+  categoryId  String
+  category    Category      @relation(fields: [categoryId], references: [id])
+  sellerId    String
+  seller      User          @relation(fields: [sellerId], references: [id])
+  
+  // Approval info
+  rejectionReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("products")
+}
+
+model Order {
+  id            String      @id @default(uuid())
+  orderNumber   String      @unique
+  customerId    String
+  customer      User        @relation(fields: [customerId], references: [id])
+  totalAmount   Decimal     @db.Decimal(10, 2)
+  status        OrderStatus @default(PENDING)
+  paymentMethod String?
+  items         OrderItem[]
+  refunds       Refund[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id])
+  productId String
+  // We store snapshot of product data
+  productName String
+  price       Decimal @db.Decimal(10, 2)
+  quantity    Int
+
+  @@map("order_items")
+}
+
+model Refund {
+  id          String       @id @default(uuid())
+  orderId     String
+  order       Order        @relation(fields: [orderId], references: [id])
+  amount      Decimal      @db.Decimal(10, 2)
+  reason      String
+  status      RefundStatus @default(REQUESTED)
+  adminNotes  String?
+  evidence    String[]     // URLs
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("refunds")
+}
+
+model Banner {
+  id          String  @id @default(uuid())
+  title       String
+  imageUrl    String
+  targetUrl   String?
+  description String?
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("banners")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  entity    String   // e.g., "Product", "User"
+  entityId  String?
+  details   Json?    // Before/After state
+  ipAddress String?
+
+  createdAt DateTime @default(now())
+
+  @@map("audit_logs")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  type      String?  // e.g., "ALERT", "INFO"
+
+  createdAt DateTime @default(now())
+
+  @@map("notifications")
+}
